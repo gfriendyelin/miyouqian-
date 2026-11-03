@@ -17,7 +17,7 @@ import android.graphics.Color;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
-import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.Toast;
 
@@ -27,7 +27,6 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        applySystemBarAppearance();
         requestNotificationPermission();
         startLocalService();
 
@@ -56,20 +55,30 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient());
         layout.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(layout);
+        // 等窗口 DecorView 完成创建后再设置系统栏，避免启动阶段空指针。
+        applySystemBarAppearance();
         web.postDelayed(() -> web.loadUrl("http://127.0.0.1:5890"), 3500);
     }
 
     @Override protected void onResume() {
         super.onResume();
-        applySystemBarAppearance();
+        // onResume 时也延后到 DecorView 就绪后执行，避免过早访问窗口控制器。
+        View decor = getWindow() == null ? null : getWindow().getDecorView();
+        if (decor != null) {
+            decor.post(this::applySystemBarAppearance);
+        }
         updateBatteryBannerVisibility();
     }
 
-    /** 浅色系统栏使用深色图标，适配浅色界面。 */
+    /** 浅色系统栏使用深色图标，使用兼容 API 避免启动阶段 WindowInsetsController 空指针。 */
     private void applySystemBarAppearance() {
         Window window = getWindow();
         if (window == null) return;
 
+        View decor = window.getDecorView();
+        if (decor == null) return;
+
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
         window.setStatusBarColor(Color.rgb(245, 248, 252));
         window.setNavigationBarColor(Color.rgb(245, 248, 252));
         if (Build.VERSION.SDK_INT >= 29) {
@@ -77,19 +86,12 @@ public class MainActivity extends Activity {
             window.setNavigationBarContrastEnforced(false);
         }
 
-        if (Build.VERSION.SDK_INT >= 30) {
-            WindowInsetsController controller = window.getInsetsController();
-            if (controller != null) {
-                int lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-                controller.setSystemBarsAppearance(lightBars, lightBars);
-            }
-        } else {
-            View decor = window.getDecorView();
-            int flags = decor.getSystemUiVisibility() | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-            if (Build.VERSION.SDK_INT >= 26) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
-            decor.setSystemUiVisibility(flags);
+        int flags = decor.getSystemUiVisibility();
+        flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+        if (Build.VERSION.SDK_INT >= 26) {
+            flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         }
+        decor.setSystemUiVisibility(flags);
     }
 
     private void updateBatteryBannerVisibility() {
