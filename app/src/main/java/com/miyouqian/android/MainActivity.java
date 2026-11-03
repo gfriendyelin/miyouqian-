@@ -20,6 +20,7 @@ import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private static final int REQ_NOTIFICATIONS = 3001;
+    private LinearLayout batteryBanner;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -29,16 +30,21 @@ public class MainActivity extends Activity {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(12, 12, 12, 8);
+        // 顶部提示和电池设置按钮作为一个整体：系统确认已豁免电池优化后隐藏。
+        batteryBanner = new LinearLayout(this);
+        batteryBanner.setOrientation(LinearLayout.VERTICAL);
+
         TextView hint = new TextView(this);
         hint.setText("米游签正在启动本地服务…\n首次启动可能需要一点时间。请保持后台通知开启。若页面未出现，请稍后重试。");
         hint.setTextColor(Color.DKGRAY);
         hint.setPadding(12, 12, 12, 12);
-        layout.addView(hint);
+        batteryBanner.addView(hint);
 
         Button battery = new Button(this);
         battery.setText("设置电池不受限制（提高自动签到可靠性）");
         battery.setOnClickListener(v -> requestIgnoreBatteryOptimization());
-        layout.addView(battery);
+        batteryBanner.addView(battery);
+        layout.addView(batteryBanner);
 
         WebView web = new WebView(this);
         web.getSettings().setJavaScriptEnabled(true);
@@ -47,6 +53,22 @@ public class MainActivity extends Activity {
         layout.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(layout);
         web.postDelayed(() -> web.loadUrl("http://127.0.0.1:5890"), 3500);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        updateBatteryBannerVisibility();
+    }
+
+    private void updateBatteryBannerVisibility() {
+        if (batteryBanner == null) return;
+        if (Build.VERSION.SDK_INT < 23) {
+            batteryBanner.setVisibility(android.view.View.GONE);
+            return;
+        }
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        boolean exempt = pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+        batteryBanner.setVisibility(exempt ? android.view.View.GONE : android.view.View.VISIBLE);
     }
 
     private void startLocalService() {
@@ -65,6 +87,7 @@ public class MainActivity extends Activity {
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         if (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName())) {
             Toast.makeText(this, "已不受电池优化限制", Toast.LENGTH_SHORT).show();
+            updateBatteryBannerVisibility();
             return;
         }
         try {
