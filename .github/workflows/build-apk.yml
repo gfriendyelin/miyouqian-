@@ -22,7 +22,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # v4 no longer requests the deprecated Google "tools" package.
+      # Chaquopy requires the configured build Python version.
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
