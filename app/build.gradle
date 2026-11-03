@@ -1,0 +1,36 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.miyouqian.android'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'com.miyouqian.android'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = '3.11'
+        pip {
+            install 'httpx>=0.27.0'
+            install 'PyYAML>=6.0.1'
+            install 'qrcode>=7.4.2'
+            install 'loguru>=0.7.2'
+            install 'pyfiglet>=1.0.2'
+            install 'Pillow==11.0.0'
+            install 'websockets>=12.0'
+        }
+    }
+}
