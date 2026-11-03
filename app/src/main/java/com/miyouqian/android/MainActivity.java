@@ -15,6 +15,9 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.graphics.Color;
 import android.view.Gravity;
+import android.view.View;
+import android.view.Window;
+import android.view.WindowInsetsController;
 import android.widget.Button;
 import android.widget.Toast;
 
@@ -24,6 +27,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        applySystemBarAppearance();
         requestNotificationPermission();
         startLocalService();
 
@@ -57,7 +61,35 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        applySystemBarAppearance();
         updateBatteryBannerVisibility();
+    }
+
+    /** 浅色系统栏使用深色图标，适配浅色界面。 */
+    private void applySystemBarAppearance() {
+        Window window = getWindow();
+        if (window == null) return;
+
+        window.setStatusBarColor(Color.rgb(245, 248, 252));
+        window.setNavigationBarColor(Color.rgb(245, 248, 252));
+        if (Build.VERSION.SDK_INT >= 29) {
+            window.setStatusBarContrastEnforced(false);
+            window.setNavigationBarContrastEnforced(false);
+        }
+
+        if (Build.VERSION.SDK_INT >= 30) {
+            WindowInsetsController controller = window.getInsetsController();
+            if (controller != null) {
+                int lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                controller.setSystemBarsAppearance(lightBars, lightBars);
+            }
+        } else {
+            View decor = window.getDecorView();
+            int flags = decor.getSystemUiVisibility() | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (Build.VERSION.SDK_INT >= 26) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            decor.setSystemUiVisibility(flags);
+        }
     }
 
     private void updateBatteryBannerVisibility() {
