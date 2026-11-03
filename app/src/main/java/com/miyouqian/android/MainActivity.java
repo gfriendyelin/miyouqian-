@@ -22,6 +22,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -36,85 +37,154 @@ public class MainActivity extends Activity {
     private static final long POLL_INTERVAL_MS = 400;
     private static final long POLL_TIMEOUT_MS = 45000;
 
-    private LinearLayout batteryBanner;
-    private TextView statusHint;
-    private Button retryButton;
-    private WebView web;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private volatile boolean webLoaded = false;
     private volatile boolean mainFrameError = false;
     private volatile boolean polling = false;
+    private volatile boolean serviceStarted = false;
+    private volatile boolean batteryWatching = false;
+
+    private LinearLayout batteryBanner;
+    private LinearLayout startupBox;
+    private TextView statusHint;
+    private Button retryButton;
+    private WebView web;
+
+    /** 未完成电池豁免时，轻量轮询监视用户是否已在系统设置里完成，避免部分 ROM 不触发 onResume。 */
+    private final Runnable batteryWatch = new Runnable() {
+        @Override public void run() {
+            batteryWatching = false;
+            if (webLoaded || serviceStarted) return;
+            if (isBatteryExempt()) {
+                syncStartupFlow();
+                return;
+            }
+            batteryWatching = true;
+            mainHandler.postDelayed(this, 800);
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         requestNotificationPermission();
-        startLocalService();
 
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(12, 12, 12, 8);
+        FrameLayout root = new FrameLayout(this);
 
-        // 顶部提示和电池设置按钮作为一个整体：系统确认已豁免电池优化后隐藏。
-        batteryBanner = new LinearLayout(this);
-        batteryBanner.setOrientation(LinearLayout.VERTICAL);
-
-        TextView batteryHint = new TextView(this);
-        batteryHint.setText("为保证每日自动签到可靠执行，建议关闭电池优化。");
-        batteryHint.setTextColor(Color.DKGRAY);
-        batteryHint.setPadding(12, 4, 12, 4);
-        batteryBanner.addView(batteryHint);
-
-        Button battery = new Button(this);
-        battery.setText("设置电池不受限制");
-        battery.setOnClickListener(v -> requestIgnoreBatteryOptimization());
-        batteryBanner.addView(battery);
-        layout.addView(batteryBanner);
-
-        // 启动状态提示：本地服务就绪前用它替代 WebView 白屏。
-        statusHint = new TextView(this);
-        statusHint.setText("米游签正在启动本地服务…\n首次启动需初始化运行环境，约 10~30 秒，请稍候。");
-        statusHint.setTextColor(Color.rgb(60, 90, 130));
-        statusHint.setGravity(Gravity.CENTER);
-        statusHint.setPadding(12, 16, 12, 16);
-        layout.addView(statusHint);
-
-        // 超时后的重试入口。
-        retryButton = new Button(this);
-        retryButton.setText("重新加载");
-        retryButton.setVisibility(View.GONE);
-        retryButton.setOnClickListener(v -> retryLoad());
-        layout.addView(retryButton);
-
+        // 底层：WebView 铺满全屏，服务就绪前先隐藏，避免暴露纯白页面。
         web = new WebView(this);
         web.getSettings().setJavaScriptEnabled(true);
         web.getSettings().setDomStorageEnabled(true);
         web.setBackgroundColor(Color.rgb(245, 248, 252));
-        // 服务就绪前先占位但不显示，避免暴露纯白页面。
         web.setVisibility(View.INVISIBLE);
         web.setWebViewClient(new WebViewClient() {
             @Override public void onPageFinished(WebView view, String url) {
                 if (mainFrameError) return;
                 webLoaded = true;
-                statusHint.setVisibility(View.GONE);
-                retryButton.setVisibility(View.GONE);
+                startupBox.setVisibility(View.GONE);
                 web.setVisibility(View.VISIBLE);
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
                     mainFrameError = true;
                     webLoaded = false;
-                    statusHint.setVisibility(View.VISIBLE);
+                    startupBox.setVisibility(View.VISIBLE);
                     statusHint.setText("页面加载失败，正在重试…");
                     scheduleReload();
                 }
             }
         });
-        layout.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
-        setContentView(layout);
+        root.addView(web, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // 等窗口 DecorView 完成创建后再设置系统栏，避免启动阶段空指针。
+        // 上层：电池设置 + 启动进度 + 重试按钮，整体垂直居中在屏幕正中央。
+        startupBox = new LinearLayout(this);
+        startupBox.setOrientation(LinearLayout.VERTICAL);
+        startupBox.setGravity(Gravity.CENTER_HORIZONTAL);
+        startupBox.setPadding(24, 0, 24, 0);
+
+        batteryBanner = new LinearLayout(this);
+        batteryBanner.setOrientation(LinearLayout.VERTICAL);
+        batteryBanner.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        TextView batteryHint = new TextView(this);
+        batteryHint.setText("请先设置电池不受限制，设置完成后将自动启动本地服务。");
+        batteryHint.setTextColor(Color.DKGRAY);
+        batteryHint.setGravity(Gravity.CENTER);
+        batteryHint.setPadding(12, 4, 12, 4);
+        batteryBanner.addView(batteryHint, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        Button battery = new Button(this);
+        battery.setText("设置电池不受限制");
+        battery.setOnClickListener(v -> requestIgnoreBatteryOptimization());
+        batteryBanner.addView(battery, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        startupBox.addView(batteryBanner);
+
+        statusHint = new TextView(this);
+        statusHint.setText("米游签正在启动本地服务…\n首次启动需初始化运行环境，约 10~30 秒，请稍候。");
+        statusHint.setTextColor(Color.rgb(60, 90, 130));
+        statusHint.setGravity(Gravity.CENTER);
+        statusHint.setPadding(12, 16, 12, 16);
+        startupBox.addView(statusHint, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        retryButton = new Button(this);
+        retryButton.setText("重新加载");
+        retryButton.setVisibility(View.GONE);
+        retryButton.setOnClickListener(v -> retryLoad());
+        startupBox.addView(retryButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        FrameLayout.LayoutParams boxLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        boxLp.gravity = Gravity.CENTER;
+        root.addView(startupBox, boxLp);
+
+        setContentView(root);
+
         applySystemBarAppearance();
-        startPolling();
+        // 关键：先检查电池豁免，未完成前不启动本地服务。
+        syncStartupFlow();
+    }
+
+    /** 统一启动流程：未豁免 → 只显示居中的电池设置；已豁免 → 启动服务并轮询加载。 */
+    private void syncStartupFlow() {
+        if (webLoaded) {
+            if (batteryBanner != null) batteryBanner.setVisibility(View.GONE);
+            return;
+        }
+        if (isBatteryExempt()) {
+            if (batteryBanner != null) batteryBanner.setVisibility(View.GONE);
+            if (!serviceStarted) {
+                serviceStarted = true;
+                Intent service = new Intent(this, MiyoService.class);
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+            }
+            if (statusHint != null) {
+                statusHint.setVisibility(View.VISIBLE);
+                if (!polling) {
+                    statusHint.setText("米游签正在启动本地服务…\n首次启动需初始化运行环境，约 10~30 秒，请稍候。");
+                }
+            }
+            if (!webLoaded && !polling) startPolling();
+        } else {
+            if (batteryBanner != null) batteryBanner.setVisibility(View.VISIBLE);
+            if (statusHint != null) statusHint.setVisibility(View.GONE);
+            startBatteryWatch();
+        }
+    }
+
+    private void startBatteryWatch() {
+        if (batteryWatching || webLoaded || serviceStarted) return;
+        batteryWatching = true;
+        mainHandler.postDelayed(batteryWatch, 800);
+    }
+
+    private boolean isBatteryExempt() {
+        if (Build.VERSION.SDK_INT < 23) return true;
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        return pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
     }
 
     /** 用户点击「重新加载」：清空状态并重新探测本地服务。 */
@@ -122,8 +192,14 @@ public class MainActivity extends Activity {
         webLoaded = false;
         mainFrameError = false;
         retryButton.setVisibility(View.GONE);
+        startupBox.setVisibility(View.VISIBLE);
         statusHint.setVisibility(View.VISIBLE);
         statusHint.setText("正在重新连接本地服务…");
+        if (!serviceStarted) {
+            serviceStarted = true;
+            Intent service = new Intent(this, MiyoService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+        }
         startPolling();
     }
 
@@ -215,9 +291,8 @@ public class MainActivity extends Activity {
         if (decor != null) {
             decor.post(this::applySystemBarAppearance);
         }
-        updateBatteryBannerVisibility();
-        // 从电池优化设置页返回时，若还没加载成功则继续/恢复探测。
-        if (!webLoaded && !polling) startPolling();
+        // 从电池优化设置页返回时，若已完成豁免则自动启动服务。
+        syncStartupFlow();
     }
 
     /** 浅色系统栏使用深色图标，使用兼容 API 避免启动阶段 WindowInsetsController 空指针。 */
@@ -244,22 +319,6 @@ public class MainActivity extends Activity {
         decor.setSystemUiVisibility(flags);
     }
 
-    private void updateBatteryBannerVisibility() {
-        if (batteryBanner == null) return;
-        if (Build.VERSION.SDK_INT < 23) {
-            batteryBanner.setVisibility(View.GONE);
-            return;
-        }
-        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-        boolean exempt = pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
-        batteryBanner.setVisibility(exempt ? View.GONE : View.VISIBLE);
-    }
-
-    private void startLocalService() {
-        Intent service = new Intent(this, MiyoService.class);
-        if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-    }
-
     private void requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFICATIONS);
@@ -271,7 +330,7 @@ public class MainActivity extends Activity {
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         if (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName())) {
             Toast.makeText(this, "已不受电池优化限制", Toast.LENGTH_SHORT).show();
-            updateBatteryBannerVisibility();
+            syncStartupFlow();
             return;
         }
         try {
