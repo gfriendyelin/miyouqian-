@@ -16,6 +16,7 @@ import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -69,6 +70,7 @@ public class MainActivity extends Activity {
         requestNotificationPermission();
 
         FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.rgb(245, 248, 252));
 
         // 底层：WebView 铺满全屏，服务就绪前先隐藏，避免暴露纯白页面。
         web = new WebView(this);
@@ -143,6 +145,7 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
+        applyWindowInsets(root);
         applySystemBarAppearance();
         // 关键：先检查电池豁免，未完成前不启动本地服务。
         syncStartupFlow();
@@ -293,6 +296,24 @@ public class MainActivity extends Activity {
         }
         // 从电池优化设置页返回时，若已完成豁免则自动启动服务。
         syncStartupFlow();
+    }
+
+    /** 处理 Android 15+ 强制 edge-to-edge：让内容避让状态栏与导航栏，避免与系统栏重叠。 */
+    private void applyWindowInsets(View root) {
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            int top = 0;
+            int bottom = 0;
+            if (Build.VERSION.SDK_INT >= 30) {
+                top = insets.getInsets(WindowInsets.Type.statusBars()).top;
+                bottom = insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+            } else {
+                top = insets.getSystemWindowInsetTop();
+                bottom = insets.getSystemWindowInsetBottom();
+            }
+            v.setPadding(0, top, 0, bottom);
+            return insets;
+        });
+        root.requestApplyInsets();
     }
 
     /** 浅色系统栏使用深色图标，使用兼容 API 避免启动阶段 WindowInsetsController 空指针。 */
