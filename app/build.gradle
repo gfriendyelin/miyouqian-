@@ -29,7 +29,7 @@ chaquopy {
             install 'qrcode>=7.4.2'
             install 'loguru>=0.7.2'
             install 'pyfiglet>=1.0.2'
-            install 'Pillow>=12.3.0'
+            install 'Pillow==11.0.0'
             install 'websockets>=12.0'
         }
     }
